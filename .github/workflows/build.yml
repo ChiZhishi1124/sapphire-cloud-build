@@ -16,13 +16,14 @@ concurrency:
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
   UPSTREAM_COMMIT: c3766c2881db36aadf93ddfde38c54cb2085b9d4
-  SAPPHIRE_TEST_DERIVED_DATA: ${{ runner.temp }}/SapphireLocalization
-  SAPPHIRE_TEST_PACKAGES_DIR: ${{ runner.temp }}/SourcePackages
 
 jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 60
+    env:
+      SAPPHIRE_TEST_DERIVED_DATA: ${{ runner.temp }}/SapphireLocalization
+      SAPPHIRE_TEST_PACKAGES_DIR: ${{ runner.temp }}/SourcePackages
     steps:
       - name: Fetch pinned official source
         uses: actions/checkout@v4
