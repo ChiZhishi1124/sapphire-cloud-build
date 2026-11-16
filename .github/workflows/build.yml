@@ -1,0 +1,106 @@
+name: Build official Sapphire with Chinese
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sapphire-cloud-build
+  cancel-in-progress: false
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
+  UPSTREAM_COMMIT: c3766c2881db36aadf93ddfde38c54cb2085b9d4
+  SAPPHIRE_TEST_DERIVED_DATA: ${{ runner.temp }}/SapphireLocalization
+  SAPPHIRE_TEST_PACKAGES_DIR: ${{ runner.temp }}/SourcePackages
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Fetch pinned official source
+        uses: actions/checkout@v4
+        with:
+          repository: cshariq/Sapphire
+          ref: c3766c2881db36aadf93ddfde38c54cb2085b9d4
+          persist-credentials: false
+
+      - name: Verify source and toolchain
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$UPSTREAM_COMMIT"
+          xcodebuild -version
+          xcrun swift --version
+          uname -m
+          mkdir -p "$RUNNER_TEMP/SapphireDelivery"
+
+      - name: Validate official catalogs
+        run: |
+          set -euo pipefail
+          python3 script/check_localization.py
+          python3 script/localization/test_catalog_check.py
+          python3 script/test_localization.py --output "$RUNNER_TEMP/SapphireDelivery/source-resources.json"
+
+      - name: Run official localization tests
+        run: |
+          set -euo pipefail
+          bash script/test_localization.sh 2>&1 | tee "$RUNNER_TEMP/SapphireDelivery/localization-build.log"
+
+      - name: Build application and helper with official public configuration
+        run: |
+          set -euo pipefail
+          xcodebuild -project Sapphire.xcodeproj -scheme Sapphire -configuration Debug \
+            -xcconfig config/LocalPublic.xcconfig \
+            -derivedDataPath "$SAPPHIRE_TEST_DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$SAPPHIRE_TEST_PACKAGES_DIR" \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO build \
+            2>&1 | tee "$RUNNER_TEMP/SapphireDelivery/application-build.log"
+
+      - name: Package local-use app and provenance
+        run: |
+          set -euo pipefail
+          APP="$SAPPHIRE_TEST_DERIVED_DATA/Build/Products/Debug/Sapphire.app"
+          OUT="$RUNNER_TEMP/SapphireDelivery"
+          test -d "$APP/Contents/Resources/zh-Hans.lproj"
+          # Local ad-hoc signing does not use or impersonate the author's identity.
+          # Do not attach restricted developer-team entitlements to a personal build.
+          codesign --force --deep --sign - --timestamp=none "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2> "$OUT/signature.txt"
+          python3 script/check_localization.py --app "$APP" > "$OUT/built-catalogs.json"
+          python3 script/test_localization.py --app "$APP" --output "$OUT/built-native-resources.json"
+          cp -R "$SAPPHIRE_TEST_DERIVED_DATA/LocalizationResults" "$OUT/LocalizationResults"
+          {
+            echo "Upstream: https://github.com/cshariq/Sapphire"
+            echo "Commit: $UPSTREAM_COMMIT"
+            echo "Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Configuration: upstream LocalPublic.xcconfig, Debug, arm64"
+            echo "Signature: personal ad-hoc; not an author-signed or notarized release"
+            echo "Private camera, microphone and File Provider features are unavailable."
+            echo "Local UI, helper permissions and hardware features require separate acceptance."
+            xcodebuild -version
+          } > "$OUT/BUILD-INFO.txt"
+          git diff --exit-code
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/Sapphire-zh-Hans-arm64.zip"
+          cd "$OUT"
+          shasum -a 256 Sapphire-zh-Hans-arm64.zip > SHA256SUMS.txt
+          cat BUILD-INFO.txt >> "$GITHUB_STEP_SUMMARY"
+          cat SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve build app and validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sapphire-public-zh-Hans-arm64
+          path: ${{ runner.temp }}/SapphireDelivery
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
