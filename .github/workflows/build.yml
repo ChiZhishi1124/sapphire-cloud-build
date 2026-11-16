@@ -21,9 +21,6 @@ jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 60
-    env:
-      SAPPHIRE_TEST_DERIVED_DATA: ${{ runner.temp }}/SapphireLocalization
-      SAPPHIRE_TEST_PACKAGES_DIR: ${{ runner.temp }}/SourcePackages
     steps:
       - name: Fetch pinned official source
         uses: actions/checkout@v4
@@ -40,6 +37,8 @@ jobs:
           xcrun swift --version
           uname -m
           mkdir -p "$RUNNER_TEMP/SapphireDelivery"
+          echo "SAPPHIRE_TEST_DERIVED_DATA=$RUNNER_TEMP/SapphireLocalization" >> "$GITHUB_ENV"
+          echo "SAPPHIRE_TEST_PACKAGES_DIR=$RUNNER_TEMP/SourcePackages" >> "$GITHUB_ENV"
 
       - name: Validate official catalogs
         run: |
